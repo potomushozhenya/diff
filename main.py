@@ -6,13 +6,14 @@ mpl.use('Qt5Agg')
 #построить расчетную схему второго порядка при значении параметра c2 в указанном варианте
 #c2 = 0.4 A=-3 B=2.5 C=1 оппонент-метод y(x0 + h) = y0 + h/2(f(x0,y0) + f(x0+h,y0 + hf(x0,y0))
 #
-c2 = 0.2
-A = 2
-B = -1
-C = -1
+c2 = 0.4
+A = -3
+B = 2.5
+C = 1
 call = 0
 atol = 10**-12
 rtol = 10**-6
+hMax = 0.1
 
 def y(x):
     return [np.exp(np.sin(x**2)), np.exp(B*np.sin(x**2)), C*np.sin(x**2)+A, np.cos(x**2)]
@@ -24,7 +25,7 @@ def f(x, y):
     if y[1] < 0 or y[0] < 0:
         print("Wrong argument")
         return np.full(shape=4, fill_value=np.nan)
-    return [2*x*(y[1]**(1/B))*y[3], 2*B*x*np.exp((B/C)*(y[2]-A)), 2*C*x*y[3], -2*x*np.log(y[0])]
+    return [2*x*(y[1]**(1/B))*y[3], 2*B*x*np.exp((B/C)*(y[2]-A))*y[3], 2*C*x*y[3], -2*x*np.log(y[0])]
 
 
 def multiply(x, y):
@@ -89,7 +90,7 @@ def hTol(h, tol, R, p):
     return ((tol*norm(R))**(1/p)) * h/2
 
 
-def fixedStepSub(x0, xFin, y0, hMain, isThird):
+def fixedStepSub(x0, xFin, y0, hMain):
     hSub = hMain/2
     i = 0
     yr = 0
@@ -107,31 +108,26 @@ def fixedStepSub(x0, xFin, y0, hMain, isThird):
             xStep.append(x0)
             y0RKMain = stepRungeKutta(x0, y0RKMain, hMain)
             y0RKSub = stepRungeKutta(x0, y0RKSub, hSub)
-            if not isThird:
-                y0HMain = stepHeun(x0, y0HMain, hMain)
-                y0HSub = stepHeun(x0, y0HSub, hSub)
-            else:
-                y0HMain = stepRungeKuttaThird(x0, y0HMain, hMain)
-                y0HSub = stepRungeKuttaThird(x0, y0HSub, hSub)
+            y0HMain = stepHeun(x0, y0HMain, hMain)
+            y0HSub = stepHeun(x0, y0HSub, hSub)
             x0 += hSub
             yStepRK.append(y0RKMain)
             yStepH.append(y0HMain)
             RstepRK.append(ruleRunge(y0RKMain, y0RKSub, 2))
             RstepH.append(ruleRunge(y0HMain, y0HSub, 2))
-            yr = y(x0)
-            print(sumVec(yr, multiply(-1, y0)))
+            if (np.isnan(y0RKMain[0]) or np.isnan(y0RKMain[1]) or np.isnan(y0RKMain[2]) or np.isnan(y0RKMain[3])) and (np.isnan(y0HMain[0]) or np.isnan(y0HMain[1]) or np.isnan(y0HMain[2]) or np.isnan(y0HMain[3])):
+                break
+            #yr = y(x0)
+            #print(sumVec(yr, multiply(-1, y0)))
         else:
             y0RKSub = stepRungeKutta(x0, y0RKSub, hSub)
-            if not isThird:
-                y0HSub = stepHeun(x0, y0HSub, hSub)
-            else:
-                y0HSub = stepRungeKuttaThird(x0, y0HSub, hSub)
+            y0HSub = stepHeun(x0, y0HSub, hSub)
             x0 += hSub
         i += 1
     return xStep, yStepRK, yStepH, RstepH, RstepRK
 
 
-def fixedStep(x0Init, xFin, y0Init, isThird=False):
+def fixedStep(x0Init, xFin, y0Init):
     yRK = []
     yH = []
     x0 = x0Init
@@ -143,7 +139,7 @@ def fixedStep(x0Init, xFin, y0Init, isThird=False):
     for k in range(7):
         h = 1 / (2**k)
         hAll.append(h)
-        xStep, yStepRK, yStepH, RstepH, RstepRK = fixedStepSub(x0, xFin, y0, h, isThird)
+        xStep, yStepRK, yStepH, RstepH, RstepRK = fixedStepSub(x0, xFin, y0, h)
         x.append(xStep)
         yRK.append(yStepRK)
         yH.append(yStepH)
@@ -154,14 +150,13 @@ def fixedStep(x0Init, xFin, y0Init, isThird=False):
     return x, yRK, yH, RH, RRK, hAll
 
 
-def optimalSub(x0, xFin, y0, R, hInit, isThird=False):
-    h = hTol(hInit, 10**-5, R, 2)
-    return fixedStepSub(x0, xFin, y0, h, isThird)
+def optimalSub(x0, xFin, y0, R, hInit):
+    h = hTol(hInit, 1e-5, R, 2)
+    return fixedStepSub(x0, xFin, y0, h)
 
 
 def optimalStep(x0, xFin, y0, R, h):
-    r = [R[i][-1] for i in range(len(R))]
-    return [[optimalSub(x0, xFin, y0, r[i], h[i])] for i in range(len(R))]
+    return optimalSub(x0, xFin, y0, R, h)
 
 
 def printYPlots(x, y, z=None):
@@ -189,17 +184,53 @@ def yGenerate(hList):
 def plotDiff(x, yRK, y):
     for i in range(len(x)):
         fig, axs = plt.subplots(2)
-        axs[0].plot(x[i], yRK[i])
+        axs[0].plot(np.log10(x[i]), np.log10(yRK[i]))
+        axs[0].plot(np.log(x[i], 2*np.log(x[i])), linestyle='dashed')
         axs[1].plot(x[i], y[i])
     plt.show()
 
 
-def printAutoStep(x, y):
-    plt.plot(x, y)
+def printAuto(x, y, z=None):
+    currY = []
+    if z!=None:
+        currY = [np.log10(norm(z[i]-y[i])) for i in range(len(y))]
+    else:
+        currY = y
+    plt.plot(x, currY)
     plt.show()
 
 
-def autoStep (x0, xFin, y0, tol, isOpponent):
+def printAutoStep(x, y):
+    hTakeX = [x[i][0] for i in range(len(x))]
+    hTakeY = [x[i][1] for i in range(len(x))]
+    plt.plot(hTakeX, hTakeY)
+    hFakeX = [y[i][0] for i in range(len(y))]
+    hFakeY = [y[i][1] for i in range(len(y))]
+    plt.plot(hFakeX, hFakeY, marker='*', linewidth=0)
+    plt.show()
+
+
+def rtolGraph(isOpponent=False):
+    global call, rtol
+    call = 0
+    callList =[]
+    rtolList = [1e-4, 1e-5, 1e-6, 1e-7, 1e-8]
+    for el in rtolList:
+        rtol = el
+        autoStep(0, 5.0, y(0), 10 ** -6, isOpponent)
+        callList.append(call)
+        call=0
+    plt.plot(np.log10(rtolList), np.log10(callList))
+    plt.show()
+
+
+def printAutoStepDiff(x, y, yReal):
+    plt.plot(x, y)
+    plt.plot(x, yReal, linestyle='dashed')
+    plt.show()
+
+
+def autoStep(x0, xFin, y0, tol, isOpponent=False):
     p = 2
     if isOpponent:
         func = stepHeun
@@ -243,7 +274,7 @@ def autoStep (x0, xFin, y0, tol, isOpponent):
             take_h.append((points_x[-1], h))
             points_y.append(y_h)
             points_x.append(points_x[-1] + h)
-            h *= 2
+            h = min(2*h, hMax)
     h = xFin - points_x[-1]
     if h > 1e-6:
         points_y.append(func(points_x[-1], points_y[-1], h))
@@ -251,10 +282,19 @@ def autoStep (x0, xFin, y0, tol, isOpponent):
     return np.array(points_x), np.array(points_y), np.array(take_h), np.array(fake_h)
 
 
-#x, yRK, yH, RH, RRK, h = fixedStep(0, 5.0, y(0), True)
-#step = optimalStep(0, 5.0, y(0), RRK, h)
-xAuto, yAuto, hTake, hFake = autoStep(0, 5.0, y(0), 10**-6, False)
+x, yRK, yH, RH, RRK, h = fixedStep(0, 5.0, y(0))
+xOpt, yRKOpt, yHOpt, RHOpt, RRKOpt = optimalStep(0, 5.0, y(0), RRK[-1][-1], h[6])
+xAuto, yAuto, hTake, hFake = autoStep(0, 5.0, y(0), 10**-4)
+printYPlots(x, yRK, RRK) #РК
+printYPlots(x, yH, RH) #Хойн
+printAuto(xOpt, yRKOpt) #Оптимальный
+yAutoReal = [y(el) for el in xAuto]
+printAuto(xAuto, yAuto, yAutoReal) #Автоматический
+printAutoStep(hTake, hFake) #Шаги
+rtolGraph()
+
+#printAutoStepDiff(xAuto, yAuto, yAutoReal)
+
+#x, yRK, yH, RH, RRK = fixedStepSub(0, 5.0, y(0), 10**-4, False)
 #y = yGenerate(h)
 #plotDiff(x, yRK, y)
-#printYPlots(x, yRK, RRK)
-printAutoStep(xAuto, yAuto)
